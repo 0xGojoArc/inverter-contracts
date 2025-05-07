@@ -5,7 +5,7 @@ pragma solidity 0.8.23;
 import {IOrchestrator_v1} from
     "src/orchestrator/interfaces/IOrchestrator_v1.sol";
 import {ERC165Upgradeable, Module_v1} from "src/modules/base/Module_v1.sol";
-import {IFM_Template_v1} from "./IFM_Template_v1.sol";
+import {IFM_Template_v1} from "./templates/modules/IFM_Template_v1.sol";
 import {IFundingManager_v1} from "@fm/IFundingManager_v1.sol";
 
 // External
