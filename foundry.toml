@@ -5,10 +5,12 @@ libs = ['lib']
 fs_permissions = [{ access = "read-write", path = "./"}]
 
 # Compilation
-solc_version = "0.8.23"
+solc_version = "0.8.26"
+evm_version = "cancun"
 optimizer = true
 optimizer_runs = 750
 via_ir = false
+ffi = true
 
 [fuzz]
 runs = 256
