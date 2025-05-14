@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 pragma solidity 0.8.23;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-
 import {OptimisticOracleV3Interface} from
     "@lm/abstracts/oracleIntegrations/UMA_OptimisticOracleV3/optimistic-oracle-v3/interfaces/OptimisticOracleV3Interface.sol";
 
