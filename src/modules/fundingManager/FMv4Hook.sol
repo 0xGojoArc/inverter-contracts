@@ -79,4 +79,8 @@ contract FundingManagerHook is BaseHook {
         beforeAddLiquidityCount[key.toId()]++;
         return BaseHook.beforeAddLiquidity.selector;
     }
+
+    function getHookData(address user) public pure returns (bytes memory) {
+        return abi.encode(user);
+    }
 }
