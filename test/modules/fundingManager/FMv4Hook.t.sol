@@ -34,88 +34,14 @@ import {IStepLadderBondingCurveManager} from "src/modules/fundingManager/FMv4Hoo
 import {ERC20Mock} from "test/utils/mocks/ERC20Mock.sol";
 import {MockMemeToken} from "test/utils/mocks/MockMemeToken.sol";
 
-// contract FundingManagerHookTest is Test {
-//     using CurrencyLibrary for address;
-
-//     PoolManager public poolManager;
-//     FundingManagerHook public hook;
-//     StepLadderBondingCurveManager public bondingCurveManager;
-
-//     ERC20Mock public tokenA;
-//     MockMemeToken public memeToken;
-
-//     address public user = address(0x1);
-
-//     function setUp() public {
-//         // Deploying tokens
-//         tokenA = new ERC20Mock("TokenA", "LEE");
-//         memeToken = new MockMemeToken("MEME", "MEME");
-
-//         // Deploying PoolManager
-//         poolManager = new PoolManager(address(this));
-
-//         // Deploying bonding curve manager
-//         bondingCurveManager = new StepLadderBondingCurveManager();
-
-//         // init data for bonding manager
-//         bytes memory initData = abi.encode(address(tokenA), address(memeToken), 1_000_000 * 1e18);
-//         bondingCurveManager.init(
-//             IOrchestrator_v1(address(1)),
-//             IModule_v1.Metadata(1, 0, 0, "", "StepLadder"),
-//             initData
-//         );
-
-//         // Deploying hook
-//         hook = new FundingManagerHook(poolManager, IStepLadderBondingCurveManager(address(bondingCurveManager)));
-
-//         vm.label(address(tokenA), "TokenA");
-//         vm.label(address(memeToken), "MEME");
-//         vm.label(address(poolManager), "PoolManager");
-//         vm.label(address(bondingCurveManager), "BondingCurveManager");
-//         vm.label(address(hook), "FundingManagerHook");
-
-//         // Mint tokens to user
-//         tokenA.mint(user, 1000 ether);
-//     }
-
-//     function testAddLiquidity() public {
-//         vm.startPrank(user);
-//         tokenA.approve(address(poolManager), type(uint256).max);
-
-//         // the pool key
-//         PoolKey memory key = PoolKey({
-//             currency0: Currency.wrap(address(tokenA)),
-//             currency1: Currency.wrap(address(memeToken)),
-//             fee: 3000,
-//             tickSpacing: 60,
-//             hooks: IHooks(address(hook))
-//         });
-
-//         poolManager.lock(
-//             abi.encodeCall(
-//                 IPoolManager.modifyLiquidity,
-//                 (
-//                     key,
-//                     ModifyLiquidityParams({
-//                         tickLower: -60,
-//                         tickUpper: 60,
-//                         liquidityDelta: 1 ether,
-//                         salt: bytes32(0)
-//                     }),
-//                     ""
-//                 )
-//             )
-//         );
-
-//         assertEq(hook.beforeAddLiquidityCount(key.toId()), 1);
-//         vm.stopPrank();
-//     }
-// }
-
+// Interfaces
+import {IERC20} from "forge-std/interfaces/IERC20.sol";
 
 contract FundingManagerHookTest is Test, Fixtures {
     using EasyPosm for IPositionManager;
     using StateLibrary for IPoolManager;
+    using PoolIdLibrary for PoolKey;
+    using CurrencyLibrary for Currency;
 
     FundingManagerHook hook;
     // PointsToken pointsToken;
@@ -129,31 +55,35 @@ contract FundingManagerHookTest is Test, Fixtures {
         // creates the pool manager, utility routers, and test tokens
         deployFreshManagerAndRouters();
         deployMintAndApprove2Currencies();
-
         deployAndApprovePosm(manager);
 
-        // Deploy the hook to an address with the correct flags
+        // deploy the hook to an address with the correct flags
         address flags = address(
             uint160(Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG) ^
                 (0x4444 << 144) // Namespace the hook to avoid collisions
         );
-        bytes memory constructorArgs = abi.encode(manager); //Add all the necessary constructor arguments from the hook
-        deployCodeTo("FMv4Hook.sol:FMv4Hook", constructorArgs, flags);
+        
+        // deploy the bonding curve manager first
+        StepLadderBondingCurveManager bondingCurveManager = new StepLadderBondingCurveManager();
+        
+        // deploy the hook with the bonding curve manager
+        bytes memory constructorArgs = abi.encode(manager, bondingCurveManager);
+        deployCodeTo("src/modules/fundingManager/FMv4Hook.sol:FundingManagerHook", constructorArgs, flags);
         hook = FundingManagerHook(flags);
         // pointsToken = hook.pointsToken();
 
-        // Create the pool
+        // create the pool with the hook
         key = PoolKey(
             Currency.wrap(address(0)),
             currency1,
             3000,
             60,
-            IHooks(address(0))
+            IHooks(address(hook))  
         );
         poolId = key.toId();
         manager.initialize(key, SQRT_PRICE_1_1);
 
-        // Provide full-range liquidity to the pool
+        // full-range liquidity to the pool
         tickLower = TickMath.minUsableTick(key.tickSpacing);
         tickUpper = TickMath.maxUsableTick(key.tickSpacing);
 
@@ -178,5 +108,82 @@ contract FundingManagerHookTest is Test, Fixtures {
             block.timestamp,
             hook.getHookData(address(this))
         );
+    }
+
+    function test_poolSetup() public {
+        // verify pool is initialized
+        (uint160 sqrtPriceX96, int24 tick,,) = manager.getSlot0(poolId); // gets current state of the pool
+        assertGt(sqrtPriceX96, 0, "Pool not initialized - sqrtPriceX96 is zero");
+        assertEq(tick, 0, "Initial tick should be 0");
+
+        // verify pool parameters
+        assertEq(uint24(key.fee), 3000, "Fee should be 3000");
+        assertEq(key.tickSpacing, 60, "Tick spacing should be 60");
+        
+        // verify hook permissions
+        Hooks.Permissions memory permissions = hook.getHookPermissions();
+        assertTrue(permissions.beforeSwap, "Hook should have beforeSwap permission");
+        assertTrue(permissions.beforeAddLiquidity, "Hook should have beforeAddLiquidity permission");
+        assertFalse(permissions.afterInitialize, "Hook should not have afterInitialize permission");
+        
+        // verify bonding curve manager is set
+        address bondingCurveManager = address(hook.bondingCurveManager());
+        assertTrue(bondingCurveManager != address(0), "Bonding curve manager should be set");
+        
+        // verify hook data encoding
+        address testUser = address(0x123); // create test address
+        bytes memory hookData = hook.getHookData(testUser);
+        (address decodedUser) = abi.decode(hookData, (address)); //get user address from hook data
+        assertEq(decodedUser, testUser, "Hook data should correctly encode user address");
+    }
+
+    function test_addLiquidity() public {
+        // initial hook call count
+        uint256 initialAddLiquidityCount = hook.beforeAddLiquidityCount(poolId);
+        
+        // liquidity parameters
+        int24 newTickLower = tickLower;
+        int24 newTickUpper = tickUpper;
+        uint128 liquidityAmount = 1e18; // 1 
+        
+        // required amounts for the liquidity position
+        (uint256 amount0, uint256 amount1) = LiquidityAmounts.getAmountsForLiquidity(
+            SQRT_PRICE_1_1,
+            TickMath.getSqrtPriceAtTick(newTickLower),
+            TickMath.getSqrtPriceAtTick(newTickUpper),
+            liquidityAmount
+        );
+        
+        // approve tokens to position manager
+        IERC20(Currency.unwrap(currency0)).approve(address(posm), amount0 + 1);
+        IERC20(Currency.unwrap(currency1)).approve(address(posm), amount1 + 1);
+        
+        // add liquidity
+        (uint256 newTokenId, ) = posm.mint(
+            key,
+            newTickLower,
+            newTickUpper,
+            liquidityAmount,
+            amount0 + 1, // some buffer for price impact
+            amount1 + 1, 
+            address(this),
+            block.timestamp,
+            hook.getHookData(address(this))
+        );
+        
+        // verify the position was created
+        assertGt(newTokenId, 0, "New position should have a valid token ID");
+        
+        // verify hook was called
+        uint256 newAddLiquidityCount = hook.beforeAddLiquidityCount(poolId);
+        assertEq(
+            newAddLiquidityCount,
+            initialAddLiquidityCount + 1,
+            "Hook's beforeAddLiquidity should be called once"
+        );
+        
+        // verify position data
+        uint128 actualLiquidity = posm.getPositionLiquidity(newTokenId);
+        assertGt(actualLiquidity, 0, "Position should have liquidity");
     }
 }

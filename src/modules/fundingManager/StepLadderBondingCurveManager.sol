@@ -150,6 +150,22 @@ contract StepLadderBondingCurveManager is IFM_Template_v1, Module_v1 {
 
     // Hook Logic (called from FundingManagerHook)
 
+        // 1. We need a variable called maxMintSupply - going to track the amount of tokens that a pool is issuing 
+        // (If I deploy a MEME token, I want to sell 1,000,000,000 for 100 ETH so my maxMintSupply == 1,000,000,000 or 100 ETH whichever is hit first)
+
+        // 2. BeforeAddLiquidity - check that the bonding curve has not been completed 
+        // (we want to revert if maxMintSupply has not been hit)
+
+        // 3. For every eth that is swapped lets mint 1,000 tokens and 
+        //send that to the user. We now have a basic "bonding curve". 
+
+        // 4. Once the maxMintSupply is hit we allow users to swap directly into the pool. 
+        // And we allow them to add liquidity
+
+        // 5. Once maxMintSupply is hit we then want to take the ETH in the contract, 
+        // mint more MEME tokens and init the pool with the MEME tokens and the ETH we raised at the CURRENT sqrtPrice
+
+
     function beforeAddLiquidityHook(address sender, uint256 amountIn) external {
         if (!bondingComplete()) {
             revert("Bonding not complete");
